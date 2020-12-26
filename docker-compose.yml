@@ -1,0 +1,16 @@
+version: '3.4'
+
+services:
+  telegram-client-demo:
+    build:
+      context: ..
+      dockerfile: ./Dockerfile
+      network: host
+    image: telegram-client-demo
+    container_name: telegram-client-demo
+    hostname: telegram-client-demo
+    volumes:
+      - "./dev:/demo"
+    working_dir: /demo
+    stdin_open: true
+    tty: true

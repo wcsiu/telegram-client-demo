@@ -16,4 +16,5 @@ RUN go build --ldflags "-extldflags '-static -L/usr/local/lib -ltdjson_static -l
 
 FROM gcr.io/distroless/base:latest
 COPY --from=golang /tmp/demo-exe /demo-runner
+EXPOSE 3000
 ENTRYPOINT [ "/demo-runner" ]

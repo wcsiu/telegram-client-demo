@@ -9,8 +9,12 @@ services:
     image: telegram-client-demo
     container_name: telegram-client-demo
     hostname: telegram-client-demo
+    expose:
+      - "3000"
     volumes:
       - "./dev:/demo"
     working_dir: /demo
     stdin_open: true
     tty: true
+    ports:
+      - 3000:3000

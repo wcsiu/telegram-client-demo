@@ -1,8 +1,11 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"math"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -11,15 +14,14 @@ import (
 	"github.com/Arman92/go-tdlib"
 )
 
-var allChats []*tdlib.Chat
-var haveFullChatList bool
+var client *tdlib.Client
 
 func main() {
 	tdlib.SetLogVerbosityLevel(1)
 	tdlib.SetFilePath("./errors.txt")
 
 	// Create new instance of client
-	client := tdlib.NewClient(tdlib.Config{
+	client = tdlib.NewClient(tdlib.Config{
 		APIID:               "FILL YOUR API ID HERE",
 		APIHash:             "FILL YOUR API HASH HERE",
 		SystemLanguageCode:  "en",
@@ -36,7 +38,7 @@ func main() {
 	})
 
 	// Handle Ctrl+C , Gracefully exit and shutdown tdlib
-	ch := make(chan os.Signal, 2)
+	var ch = make(chan os.Signal, 2)
 	signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		<-ch
@@ -51,7 +53,7 @@ func main() {
 				fmt.Print("Enter phone: ")
 				var number string
 				fmt.Scanln(&number)
-				_, err := client.SendPhoneNumber(number)
+				var _, err = client.SendPhoneNumber(number)
 				if err != nil {
 					fmt.Printf("Error sending phone number: %v\n", err)
 				}
@@ -59,7 +61,7 @@ func main() {
 				fmt.Print("Enter code: ")
 				var code string
 				fmt.Scanln(&code)
-				_, err := client.SendAuthCode(code)
+				var _, err = client.SendAuthCode(code)
 				if err != nil {
 					fmt.Printf("Error sending auth code : %v\n", err)
 				}
@@ -67,7 +69,7 @@ func main() {
 				fmt.Print("Enter Password: ")
 				var password string
 				fmt.Scanln(&password)
-				_, err := client.SendAuthPassword(password)
+				var _, err = client.SendAuthPassword(password)
 				if err != nil {
 					fmt.Printf("Error sending auth password: %v\n", err)
 				}
@@ -80,33 +82,52 @@ func main() {
 
 	// Wait while we get Authorization Ready!
 	// Note: See authorization example for complete auhtorization sequence example
-	currentState, _ := client.Authorize()
+	var currentState, _ = client.Authorize()
 	for ; currentState.GetAuthorizationStateEnum() != tdlib.AuthorizationStateReadyType; currentState, _ = client.Authorize() {
 		time.Sleep(300 * time.Millisecond)
 	}
 
-	// get at most 1000 chats list
-	getChatList(client, 1000)
-	fmt.Printf("got %d chats\n", len(allChats))
+	http.HandleFunc("/getChats", getChatsHandler)
+	http.ListenAndServe(":3000", nil)
+}
 
+func getChatsHandler(w http.ResponseWriter, req *http.Request) {
+	var allChats, getChatErr = getChatList(client, 1000)
+	if getChatErr != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(getChatErr.Error()))
+		return
+	}
+
+	var retMap = make(map[string]interface{})
+	retMap["total"] = len(allChats)
+
+	var chatTitles []string
 	for _, chat := range allChats {
-		fmt.Printf("Chat title: %s \n", chat.Title)
+		chatTitles = append(chatTitles, chat.Title)
 	}
 
-	for {
-		time.Sleep(1 * time.Second)
+	retMap["chatList"] = chatTitles
+
+	var ret, marshalErr = json.Marshal(retMap)
+	if marshalErr != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(marshalErr.Error()))
+		return
 	}
+
+	io.WriteString(w, string(ret))
 }
 
 // see https://stackoverflow.com/questions/37782348/how-to-use-getchats-in-tdlib
-func getChatList(client *tdlib.Client, limit int) error {
+func getChatList(client *tdlib.Client, limit int) ([]*tdlib.Chat, error) {
+	var allChats []*tdlib.Chat
+	var offsetOrder = int64(math.MaxInt64)
+	var offsetChatID = int64(0)
+	var chatList = tdlib.NewChatListMain()
+	var lastChat *tdlib.Chat
 
-	if !haveFullChatList && limit > len(allChats) {
-		offsetOrder := int64(math.MaxInt64)
-		offsetChatID := int64(0)
-		var chatList = tdlib.NewChatListMain()
-		var lastChat *tdlib.Chat
-
+	for len(allChats) < limit {
 		if len(allChats) > 0 {
 			lastChat = allChats[len(allChats)-1]
 			for i := 0; i < len(lastChat.Positions); i++ {
@@ -119,26 +140,25 @@ func getChatList(client *tdlib.Client, limit int) error {
 		}
 
 		// get chats (ids) from tdlib
-		chats, err := client.GetChats(chatList, tdlib.JSONInt64(offsetOrder),
+		var chats, getChatsErr = client.GetChats(chatList, tdlib.JSONInt64(offsetOrder),
 			offsetChatID, int32(limit-len(allChats)))
-		if err != nil {
-			return err
+		if getChatsErr != nil {
+			return nil, getChatsErr
 		}
 		if len(chats.ChatIDs) == 0 {
-			haveFullChatList = true
-			return nil
+			return allChats, nil
 		}
 
 		for _, chatID := range chats.ChatIDs {
 			// get chat info from tdlib
-			chat, err := client.GetChat(chatID)
-			if err == nil {
+			var chat, getChatErr = client.GetChat(chatID)
+			if getChatErr == nil {
 				allChats = append(allChats, chat)
 			} else {
-				return err
+				return nil, getChatErr
 			}
 		}
-		return getChatList(client, limit)
 	}
-	return nil
+
+	return allChats, nil
 }

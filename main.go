@@ -116,6 +116,7 @@ func getChatsHandler(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	w.Header().Set("Content-Type", "application/json")
 	io.WriteString(w, string(ret))
 }
 
